@@ -1,0 +1,167 @@
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:batch="http://www.springframework.org/schema/batch"
+	xmlns:task="http://www.springframework.org/schema/task"
+	xmlns:context="http://www.springframework.org/schema/context"
+	xmlns:beans="http://www.springframework.org/schema/beans"
+	xsi:schemaLocation="
+	http://www.springframework.org/schema/beans
+	http://www.springframework.org/schema/beans/spring-beans-4.3.xsd
+	http://www.springframework.org/schema/batch
+	http://www.springframework.org/schema/batch/spring-batch-3.0.xsd
+	http://www.springframework.org/schema/task
+    http://www.springframework.org/schema/task/spring-task-4.3.xsd
+    http://www.springframework.org/schema/context 
+    http://www.springframework.org/schema/context/spring-context-4.3.xsd">
+
+
+	
+	<!-- <context:property-placeholder location="classpath:application.properties" /> -->
+
+
+	<context:component-scan base-package="com.greaterbank.transactionprocessing" />	
+	
+	<!-- <bean class="org.springframework.beans.factory.config.PropertyPlaceholderConfigurer">
+		<property name="location">
+			
+			<value>file:properties\\application.properties</value>
+		</property>
+	</bean> -->
+	
+	
+	
+	<bean id="log4jInitializer" class="org.springframework.beans.factory.config.MethodInvokingFactoryBean" >
+	
+		<property name="staticMethod">
+			<value>org.springframework.util.Log4jConfigurer.initLogging</value>
+		</property>
+		
+	    <property name="arguments">
+	        <list>
+	            <value>classpath:log4j/log4j.xml</value>
+	        </list>
+	    </property>
+	</bean>
+	
+	
+
+	<bean id="transactionFileModel" class="com.greaterbank.transactionprocessing.model.TransactionFileModel" scope="prototype" />
+	
+	<bean id="itemProcessor" class="com.greaterbank.transactionprocessing.processor.TransactionItemProcessor" scope="step"/>
+
+	<bean id="jobExecutionListener" class="com.greaterbank.transactionprocessing.listener.TransactionProcessingJobListener" />
+	
+	<bean id="fileNameListener" class="com.greaterbank.transactionprocessing.listener.TransactionProcessingFileNameListener" scope="step">
+		<property name="inputDirectory"  ref="inputDirectory"/>
+		<property name="processedDirectory"  ref="processedDirectory"/>
+		<property name="outputDirectory"  ref="outputDirectory"/>
+		<property name="fileNamePattern" ref="fileNamePattern"/>
+		<property name="waitTimeFileProcessing" ref="waitTimeFileProcessing"/>
+	</bean>
+
+	<batch:job id="transactionProcessingJob">
+	  <batch:step id="step1">
+		<batch:tasklet>
+			<batch:chunk reader="cvsFileItemReader" writer="txtItemWriter" processor="itemProcessor" commit-interval="10">
+			</batch:chunk>
+			<batch:listeners>
+	    		<batch:listener ref="fileNameListener"/>
+			</batch:listeners>
+		</batch:tasklet>
+	  </batch:step>
+	  	<batch:listeners>
+    		<batch:listener ref="jobExecutionListener"/>
+		</batch:listeners>
+	</batch:job>
+
+	<bean id="cvsFileItemReader" class="org.springframework.batch.item.file.FlatFileItemReader" scope="step">
+
+		<property name="resource" value="#{stepExecutionContext[inputFileName]}" />
+
+		<property name="linesToSkip" value="1"/>
+		<property name="lineMapper">
+		    <bean class="org.springframework.batch.item.file.mapping.DefaultLineMapper">
+			<property name="lineTokenizer">
+				<bean
+					class="org.springframework.batch.item.file.transform.DelimitedLineTokenizer">
+					<property name="names" value="customerAccount, transactionAmount" />
+				</bean>
+			</property>
+			<property name="fieldSetMapper">
+				<!-- <bean class="com.greaterbank.transactionprocessing.model.TransactionFileModel" />  -->
+
+				 <!-- if no data type conversion, use BeanWrapperFieldSetMapper to map by name-->
+				<bean
+					class="org.springframework.batch.item.file.mapping.BeanWrapperFieldSetMapper">
+					<property name="prototypeBeanName" value="transactionFileModel" />
+				</bean> 
+				 
+			</property>
+		    </bean>
+		</property>
+
+	</bean>
+	
+	<bean id="transactionScheduler" class="com.greaterbank.transactionprocessing.TransactionProcessingScheduler" />
+
+	<task:scheduled-tasks>
+		<!-- <task:scheduled ref="transactionScheduler" method="run" fixed-delay="5000"/>  -->
+ 		    <task:scheduled ref="transactionScheduler" method="run" cron="${CRON_JOB_TIME_1}" />
+			<task:scheduled ref="transactionScheduler" method="run" cron="${CRON_JOB_TIME_2}" /> 
+    </task:scheduled-tasks>
+	
+	
+	<bean id="txtItemWriter" class="com.greaterbank.transactionprocessing.writer.TransactionItemWriter" scope="step">
+	</bean>
+
+	<bean id="jobRepository"
+		class="org.springframework.batch.core.repository.support.MapJobRepositoryFactoryBean">
+		<property name="transactionManager" ref="transactionManager" />
+    </bean>
+
+    <bean id="transactionManager"
+		class="org.springframework.batch.support.transaction.ResourcelessTransactionManager" />
+
+
+    <bean id="jobLauncher"
+		class="org.springframework.batch.core.launch.support.SimpleJobLauncher">
+		<property name="jobRepository" ref="jobRepository" />
+    </bean>
+    
+    <bean id="inputDirectory" class="java.lang.String">
+    	<constructor-arg value="${TRANSACTION_PROCESSING}/pending"/>
+    </bean>
+    
+     <bean id="processedDirectory" class="java.lang.String">
+    	<constructor-arg value="${TRANSACTION_PROCESSING}/processed"/>
+    </bean>
+    
+     <bean id="outputDirectory" class="java.lang.String"> 
+    	<constructor-arg value="${TRANSACTION_PROCESSING}/reports"/>
+    </bean>
+    
+    <bean id="fileNamePattern" class="java.lang.String">
+    	<constructor-arg value="${FILE_NAME_PATTERN}"/>
+    </bean>
+    
+    <bean id="waitTimeFileProcessing" class="java.lang.Long">
+    	<constructor-arg value="${WAIT_TIME_FILE_PROCESSING}"/>
+    </bean>
+
+	
+	<beans profile="dev">
+		<bean class="org.springframework.beans.factory.config.PropertyPlaceholderConfigurer">
+			<property name="location">
+				<value>classpath:properties\\application-dev.properties</value>
+			</property>
+		</bean>
+	</beans>
+	
+	<beans profile="test">
+		<bean class="org.springframework.beans.factory.config.PropertyPlaceholderConfigurer">
+			<property name="location">
+				<value>classpath:properties\\application-test.properties</value>
+			</property>
+		</bean>
+	</beans>
+</beans>
